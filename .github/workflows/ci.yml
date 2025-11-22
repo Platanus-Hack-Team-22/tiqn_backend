@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+env:
+  REQUIRED_SECRETS: SSH_IP SSH_USER SSH_PRIVATE_KEY ENVIRONMENT AZURE_OPENAI_TRANSCRIBE_URL AZURE_OPENAI_API_KEY AZURE_OPENAI_CHAT_URL AZURE_OPENAI_TTS_URL AZURE_OPENAI_TTS_MODEL AZURE_OPENAI_TTS_VOICE ANTHROPIC_API_KEY AZURE_SPEECH_KEY AZURE_SPEECH_REGION AZURE_SPEECH_ENDPOINT LOG_LEVEL PORT HOST
+
 jobs:
   deploy:
     name: Deploy
@@ -13,6 +16,42 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+
+      - name: Validate and configure environment variables
+        env:
+          SSH_IP: ${{ secrets.SSH_IP }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          ENVIRONMENT: ${{ secrets.ENVIRONMENT }}
+          AZURE_OPENAI_TRANSCRIBE_URL: ${{ secrets.AZURE_OPENAI_TRANSCRIBE_URL }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_CHAT_URL: ${{ secrets.AZURE_OPENAI_CHAT_URL }}
+          AZURE_OPENAI_TTS_URL: ${{ secrets.AZURE_OPENAI_TTS_URL }}
+          AZURE_OPENAI_TTS_MODEL: ${{ secrets.AZURE_OPENAI_TTS_MODEL }}
+          AZURE_OPENAI_TTS_VOICE: ${{ secrets.AZURE_OPENAI_TTS_VOICE }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
+          AZURE_SPEECH_ENDPOINT: ${{ secrets.AZURE_SPEECH_ENDPOINT }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
+          PORT: ${{ secrets.PORT }}
+          HOST: ${{ secrets.HOST }}
+        run: |
+          # Validate all required secrets are present
+          MISSING_VARS=()
+          for VAR in $REQUIRED_SECRETS; do
+            if [ -z "${!VAR}" ]; then
+              MISSING_VARS+=("$VAR")
+            fi
+          done
+
+          if [ ${#MISSING_VARS[@]} -gt 0 ]; then
+            echo "Error: The following required variables are missing:"
+            printf '  - %s\n' "${MISSING_VARS[@]}"
+            exit 1
+          fi
+
+          echo "All required variables are present"
 
       - name: Sync files to server using SFTP (Rsync over SSH)
         uses: appleboy/scp-action@master
@@ -34,28 +73,20 @@ jobs:
           port: 22
           script: |
             cd ~/backend/core_api
-            sudo docker stop tiqn-backend-prod
-            sudo docker rm tiqn-backend-prod
+
+            sudo docker stop tiqn-backend-prod || true
+            sudo docker rm tiqn-backend-prod || true
 
             docker image prune -af
             docker system prune -f
 
-            rm .env
+            rm -f .env
             touch .env
-            echo 'ENVIRONMENT=${{ secrets.ENVIRONMENT }}' >> .env
-            echo 'AZURE_OPENAI_TRANSCRIBE_URL=${{ secrets.AZURE_OPENAI_TRANSCRIBE_URL }}'>> .env
-            echo 'AZURE_OPENAI_API_KEY=${{ secrets.AZURE_OPENAI_API_KEY }}' >> .env
-            echo 'AZURE_OPENAI_CHAT_URL=${{ secrets.AZURE_OPENAI_CHAT_URL }}' >> .env
-            echo 'AZURE_OPENAI_TTS_URL=${{ secrets.AZURE_OPENAI_TTS_URL }}' >> .env
-            echo 'AZURE_OPENAI_TTS_MODEL=${{ secrets.AZURE_OPENAI_TTS_MODEL }}' >> .env
-            echo 'AZURE_OPENAI_TTS_VOICE=${{ secrets.AZURE_OPENAI_TTS_VOICE }}' >> .env
-            echo 'ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}' >> .env
-            echo 'AZURE_SPEECH_KEY=${{ secrets.AZURE_SPEECH_KEY }}' >> .env
-            echo 'AZURE_SPEECH_REGION=${{ secrets.AZURE_SPEECH_REGION }}' >> .env
-            echo 'AZURE_SPEECH_ENDPOINT=${{ secrets.AZURE_SPEECH_ENDPOINT }}' >> .env
-            echo 'LOG_LEVEL=${{ secrets.LOG_LEVEL }}' >> .env
-            echo 'PORT=${{ secrets.PORT }}' >> .env
-            echo 'HOST=${{ secrets.HOST }}' >> .env
+
+            # Write all required secrets to .env file
+            for VAR in $REQUIRED_SECRETS; do
+              echo "$VAR=${!VAR}" >> .env
+            done
 
             sudo docker build -t tiqn-backend .
             sudo docker run --env-file .env -d -p 80:9000 --name tiqn-backend-prod tiqn-backend
