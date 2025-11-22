@@ -7,6 +7,9 @@ app = FastAPI()
 
 origins = [
     "http://localhost:8080",
+    "https://tiqn.app",
+    "https://www.tiqn.app",
+    "https://api.tiqn.app",
 ]
 app.add_middleware(
     CORSMiddleware,
