@@ -1,0 +1,49 @@
+name: Deployment Workflow
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Sync files to server using SFTP (Rsync over SSH)
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SSH_IP }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: "./*,!.git"
+          target: "~/backend"
+          overwrite: true
+
+      - name: Restart Docker Compose and Reload
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SSH_IP }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            cd ~/backend/core_api
+            sudo docker stop tiqn-backend-prod
+            sudo docker rm tiqn-backend-prod
+
+            docker image prune -af
+            docker system prune -f
+
+            rm .env
+            touch .env
+            echo 'ENVIRONMENT=${{ secrets.ENVIRONMENT }}' >> .env
+            echo 'OPENAI_KEY=${{ secrets.OPENAI_KEY}}' >> .env
+
+            sudo docker build -t tiqn-backend .
+            sudo docker run --env-file .env -d -p 80:9000 --name tiqn-backend-prod tiqn-backend
