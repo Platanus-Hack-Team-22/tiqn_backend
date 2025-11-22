@@ -109,6 +109,27 @@ async def process_audio_chunk(
             },
         }
     
+    return await process_text_chunk(
+        chunk_text=chunk_text,
+        session_id=session_id,
+        dispatcher_id=dispatcher_id,
+        update_convex=update_convex,
+    )
+
+
+async def process_text_chunk(
+    chunk_text: str,
+    session_id: str,
+    dispatcher_id: str | None = None,
+    update_convex: bool = True,
+) -> ProcessChunkResult:
+    """
+    Process a text chunk (simulating transcribed audio).
+    Useful for testing or text-only inputs.
+    """
+    # Get or create session for this call
+    session = session_manager.get_or_create_session(session_id)
+
     # Step 2: Add to session transcript
     session.add_transcript_chunk(chunk_text)
     
