@@ -1,6 +1,9 @@
 # TIQN Emergency Services API
+
 TO RUN uv run fastapi dev src/main.py
 FastAPI backend for real-time audio transcription and emergency data extraction for Hatzalah Chile.
+
+a
 
 ## Features
 
@@ -37,6 +40,7 @@ cp .env.example .env
 ```
 
 Required environment variables:
+
 - `DATABASE_URL` - PostgreSQL connection string
 - `AZURE_SPEECH_KEY` - Azure Speech Services subscription key
 - `AZURE_SPEECH_REGION` - Azure region (e.g., "eastus")
@@ -51,6 +55,7 @@ uv run fastapi dev src/main.py
 ```
 
 The API will be available at:
+
 - API: http://localhost:8000
 - Docs: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
@@ -64,12 +69,14 @@ The API will be available at:
 Real-time audio transcription with incremental data extraction.
 
 **Client workflow:**
+
 1. Connect to WebSocket
 2. Send audio chunks as binary data (every ~5 seconds)
 3. Receive JSON responses with transcript + canonical data
 4. Close connection when call ends
 
 **Response format:**
+
 ```json
 {
   "chunk_text": "El paciente está en Apoquindo 3000",
@@ -87,8 +94,9 @@ Real-time audio transcription with incremental data extraction.
 ```
 
 **Example (JavaScript):**
+
 ```javascript
-const ws = new WebSocket('ws://localhost:8000/stream/transcribe/call-123');
+const ws = new WebSocket("ws://localhost:8000/stream/transcribe/call-123");
 
 // Send audio chunks (e.g., from MediaRecorder)
 mediaRecorder.ondataavailable = (event) => {
@@ -100,8 +108,8 @@ mediaRecorder.ondataavailable = (event) => {
 // Receive updates
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
-  console.log('Transcript:', data.chunk_text);
-  console.log('Location:', data.canonical.direccion, data.canonical.numero);
+  console.log("Transcript:", data.chunk_text);
+  console.log("Location:", data.canonical.direccion, data.canonical.numero);
 };
 ```
 
@@ -112,6 +120,7 @@ ws.onmessage = (event) => {
 Get temporary Azure Speech token for client-side SDK.
 
 **Response:**
+
 ```json
 {
   "token": "eyJ0eXAi...",
@@ -126,11 +135,13 @@ Get temporary Azure Speech token for client-side SDK.
 Upload audio file for transcription and data extraction.
 
 **Request:**
+
 - Content-Type: `multipart/form-data`
 - Field: `file` (audio file, max 25 MB)
 - Supported formats: webm, wav, mp3, mp4
 
 **Response:**
+
 ```json
 {
   "text": "Hola, mi nombre es Juan Pérez...",
@@ -148,6 +159,7 @@ Upload audio file for transcription and data extraction.
 Extract canonical data from existing transcript text.
 
 **Request:**
+
 ```json
 {
   "text": "El paciente es un hombre de 65 años, consciente, con dolor en el pecho"
@@ -155,6 +167,7 @@ Extract canonical data from existing transcript text.
 ```
 
 **Response:**
+
 ```json
 {
   "text": "El paciente es un hombre de 65 años...",
@@ -188,24 +201,30 @@ List all active sessions.
 The canonical emergency data includes 31 fields:
 
 **Personal:**
+
 - nombre, apellido, sexo, edad
 
 **Location:**
+
 - direccion, numero, comuna, depto, ubicacion_referencia, ubicacion_detalle, google_maps_url
 
 **Medical:**
+
 - codigo (triage: Verde/Amarillo/Rojo)
 - avdi (AVPU: alerta/verbal/dolor/inconsciente)
 - estado_respiratorio, consciente, respira
 - motivo, inicio_sintomas
 
 **Resources:**
+
 - cantidad_rescatistas, recursos_requeridos
 
 **History:**
+
 - estado_basal, let_dnr, historia_clinica, medicamentos, alergias
 
 **Administrative:**
+
 - seguro_salud, aviso_conserjeria, signos_vitales, checklist_url, medico_turno
 
 ## Architecture
