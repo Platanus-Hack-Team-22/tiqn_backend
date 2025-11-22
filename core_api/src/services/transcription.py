@@ -10,7 +10,7 @@ import httpx
 from ..config import settings
 
 
-async def transcribe_audio_chunk_whisper(audio_data: bytes) -> str:
+async def transcribe_audio_chunk_whisper(audio_data: bytes, content_type: str = "audio/webm", filename: str = "audio.webm") -> str:
     """Transcribe audio chunk using Azure OpenAI Whisper."""
     
     if not settings.AZURE_OPENAI_API_KEY or not settings.AZURE_OPENAI_TRANSCRIBE_URL:
@@ -18,7 +18,7 @@ async def transcribe_audio_chunk_whisper(audio_data: bytes) -> str:
     
     # Create form data
     files = {
-        "file": ("audio.webm", io.BytesIO(audio_data), "audio/webm")
+        "file": (filename, io.BytesIO(audio_data), content_type)
     }
     data = {
         "model": "whisper-1",

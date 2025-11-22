@@ -1,10 +1,13 @@
 """Convex database service for saving emergency call data."""
 
+import logging
 from typing import Any
 from convex import ConvexClient
 
 from ..config import settings
 from ..schemas import CanonicalV2
+
+logger = logging.getLogger(__name__)
 
 
 def split_string_to_array(value: str) -> list[str]:
@@ -237,6 +240,7 @@ class ConvexService:
             canonical = CanonicalV2(**canonical_data)
         
         try:
+            logger.info(f"Creating/Updating incident for session {session_id}")
             # Build update data from canonical
             update_data = {
                 "callSessionId": session_id,
@@ -292,6 +296,7 @@ class ConvexService:
             
             # Call Convex mutation (creates if doesn't exist, updates if it does)
             incident_id = self.client.mutation("incidents:createOrUpdate", update_data)
+            logger.info(f"Successfully updated incident {incident_id}")
             
             return {
                 "success": True,
