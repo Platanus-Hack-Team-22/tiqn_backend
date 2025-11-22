@@ -96,23 +96,22 @@ jobs:
             docker image prune -af
             docker system prune -f
 
-            rm -f .env
-            touch .env
-
-            echo "ENVIRONMENT=$ENVIRONMENT" >> .env
-            echo "AZURE_OPENAI_TRANSCRIBE_URL=$AZURE_OPENAI_TRANSCRIBE_URL" >> .env
-            echo "AZURE_OPENAI_API_KEY=$AZURE_OPENAI_API_KEY" >> .env
-            echo "AZURE_OPENAI_CHAT_URL=$AZURE_OPENAI_CHAT_URL" >> .env
-            echo "AZURE_OPENAI_TTS_URL=$AZURE_OPENAI_TTS_URL" >> .env
-            echo "AZURE_OPENAI_TTS_MODEL=$AZURE_OPENAI_TTS_MODEL" >> .env
-            echo "AZURE_OPENAI_TTS_VOICE=$AZURE_OPENAI_TTS_VOICE" >> .env
-            echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> .env
-            echo "AZURE_SPEECH_KEY=$AZURE_SPEECH_KEY" >> .env
-            echo "AZURE_SPEECH_REGION=$AZURE_SPEECH_REGION" >> .env
-            echo "AZURE_SPEECH_ENDPOINT=$AZURE_SPEECH_ENDPOINT" >> .env
-            echo "LOG_LEVEL=$LOG_LEVEL" >> .env
-            echo "PORT=$PORT" >> .env
-            echo "HOST=$HOST" >> .env
+            cat > .env << 'EOF'
+ENVIRONMENT=${{ secrets.ENVIRONMENT }}
+AZURE_OPENAI_TRANSCRIBE_URL=${{ secrets.AZURE_OPENAI_TRANSCRIBE_URL }}
+AZURE_OPENAI_API_KEY=${{ secrets.AZURE_OPENAI_API_KEY }}
+AZURE_OPENAI_CHAT_URL=${{ secrets.AZURE_OPENAI_CHAT_URL }}
+AZURE_OPENAI_TTS_URL=${{ secrets.AZURE_OPENAI_TTS_URL }}
+AZURE_OPENAI_TTS_MODEL=${{ secrets.AZURE_OPENAI_TTS_MODEL }}
+AZURE_OPENAI_TTS_VOICE=${{ secrets.AZURE_OPENAI_TTS_VOICE }}
+ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+AZURE_SPEECH_KEY=${{ secrets.AZURE_SPEECH_KEY }}
+AZURE_SPEECH_REGION=${{ secrets.AZURE_SPEECH_REGION }}
+AZURE_SPEECH_ENDPOINT=${{ secrets.AZURE_SPEECH_ENDPOINT }}
+LOG_LEVEL=${{ secrets.LOG_LEVEL }}
+PORT=${{ secrets.PORT }}
+HOST=${{ secrets.HOST }}
+EOF
 
             sudo docker build -t tiqn-backend .
             sudo docker run --env-file .env -d -p 80:8000 --name tiqn-backend-prod tiqn-backend
