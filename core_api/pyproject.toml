@@ -5,7 +5,6 @@ description = "Emergency services AI transcription and data extraction API"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "alembic>=1.16.4",
     "anthropic>=0.39.0",
     "azure-cognitiveservices-speech>=1.47.0",
     "convex>=0.7.0",
