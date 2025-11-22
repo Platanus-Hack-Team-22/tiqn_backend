@@ -9,4 +9,3 @@ RUN uv pip install --system --requirement pyproject.toml
 COPY . .
 
 ENTRYPOINT ["./entrypoint.sh"]
-
