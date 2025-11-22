@@ -241,6 +241,7 @@ class ConvexService:
         
         try:
             logger.info(f"Creating/Updating incident for session {session_id}")
+            logger.info(f"Dispatcher ID: {dispatcher_id}")
             # Build update data from canonical
             update_data = {
                 "callSessionId": session_id,
@@ -295,6 +296,7 @@ class ConvexService:
             update_data = {k: v for k, v in update_data.items() if v is not None}
             
             # Call Convex mutation (creates if doesn't exist, updates if it does)
+            logger.info(f"Calling incidents:createOrUpdate with data: {update_data}")
             incident_id = self.client.mutation("incidents:createOrUpdate", update_data)
             logger.info(f"Successfully updated incident {incident_id}")
             
@@ -305,6 +307,7 @@ class ConvexService:
             }
             
         except Exception as e:
+            logger.error(f"Failed to update incident in Convex: {e}", exc_info=True)
             return {
                 "success": False,
                 "error": str(e),

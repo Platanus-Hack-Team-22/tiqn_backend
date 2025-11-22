@@ -88,13 +88,16 @@ async def process_audio_chunk(
     """
     
     # Get or create session for this call
+    print("*" * 100)
+    print(f"{session_id=}")
+    print("*" * 100)
     session = session_manager.get_or_create_session(session_id)
-    
+    print(f"Finally the session is {session}")
     # Step 1: Transcribe audio chunk to text
     chunk_text = await transcribe_audio_chunk_whisper(
         audio_chunk, content_type=audio_content_type, filename=audio_filename
     )
-    
+
     if not chunk_text:
         # Return current state if transcription produced no text
         return {
@@ -108,7 +111,7 @@ async def process_audio_chunk(
                 "chunk_count": session.chunk_count,
             },
         }
-    
+
     return await process_text_chunk(
         chunk_text=chunk_text,
         session_id=session_id,
@@ -130,20 +133,37 @@ async def process_text_chunk(
     # Get or create session for this call
     session = session_manager.get_or_create_session(session_id)
 
+    print("*" * 100)
+    print(f"{session=}")
+    print("*" * 100)
+
     # Step 2: Add to session transcript
     session.add_transcript_chunk(chunk_text)
-    
+
+    print("*" * 100)
+    print(f"Transcript so far: {session.full_transcript}")
+    print("*" * 100)
+
     # Step 3: Extract/update canonical data using Claude AI
     updated_canonical = await extract_with_claude(
         transcript_chunk=chunk_text,
         existing_canonical=session.canonical_data,
     )
-    
+
     # Step 4: Update session with new canonical data
     session.update_canonical(updated_canonical)
-    
+
+    print("*" * 100)
+    print(f"Canonical data: {session.canonical_data}")
+    print("*" * 100)
+
     # Step 5: Update Convex in real-time (if enabled and dispatcher_id provided)
     convex_update_result = None
+    print("*" * 100)
+    print(f"{update_convex=}")
+    print(f"{settings.CONVEX_URL=}")
+    print(f"{dispatcher_id=}")
+    print("*" * 100)
     if update_convex and settings.CONVEX_URL and dispatcher_id:
         try:
             logger.info(

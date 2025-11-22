@@ -58,6 +58,8 @@ async def twilio_stream_websocket(websocket: WebSocket):
         # Fallback for backward compatibility or testing
         dispatcher_id = "js7crtvfa7c5ctm6j09q8n16sh7vwrtk"
 
+    logger.info(f"Using dispatcher_id: {dispatcher_id}")
+
     stream_sid = None
     audio_buffer = bytearray()
     frame_count = 0
