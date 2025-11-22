@@ -43,7 +43,19 @@ jobs:
             rm .env
             touch .env
             echo 'ENVIRONMENT=${{ secrets.ENVIRONMENT }}' >> .env
-            echo 'OPENAI_KEY=${{ secrets.OPENAI_KEY}}' >> .env
+            echo 'AZURE_OPENAI_TRANSCRIBE_URL=${{ secrets.AZURE_OPENAI_TRANSCRIBE_URL }}'>> .env
+            echo 'AZURE_OPENAI_API_KEY=${{ secrets.AZURE_OPENAI_API_KEY }}' >> .env
+            echo 'AZURE_OPENAI_CHAT_URL=${{ secrets.AZURE_OPENAI_CHAT_URL }}' >> .env
+            echo 'AZURE_OPENAI_TTS_URL=${{ secrets.AZURE_OPENAI_TTS_URL }}' >> .env
+            echo 'AZURE_OPENAI_TTS_MODEL=${{ secrets.AZURE_OPENAI_TTS_MODEL }}' >> .env
+            echo 'AZURE_OPENAI_TTS_VOICE=${{ secrets.AZURE_OPENAI_TTS_VOICE }}' >> .env
+            echo 'ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}' >> .env
+            echo 'AZURE_SPEECH_KEY=${{ secrets.AZURE_SPEECH_KEY }}' >> .env
+            echo 'AZURE_SPEECH_REGION=${{ secrets.AZURE_SPEECH_REGION }}' >> .env
+            echo 'AZURE_SPEECH_ENDPOINT=${{ secrets.AZURE_SPEECH_ENDPOINT }}' >> .env
+            echo 'LOG_LEVEL=${{ secrets.LOG_LEVEL }}' >> .env
+            echo 'PORT=${{ secrets.PORT }}' >> .env
+            echo 'HOST=${{ secrets.HOST }}' >> .env
 
             sudo docker build -t tiqn-backend .
             sudo docker run --env-file .env -d -p 80:9000 --name tiqn-backend-prod tiqn-backend
