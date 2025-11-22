@@ -89,4 +89,4 @@ jobs:
             done
 
             sudo docker build -t tiqn-backend .
-            sudo docker run --env-file .env -d -p 80:8000--name tiqn-backend-prod tiqn-backend
+            sudo docker run --env-file .env -d -p 80:8000 --name tiqn-backend-prod tiqn-backend
