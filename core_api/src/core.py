@@ -5,14 +5,16 @@ This module provides the main function that your team member's API should call.
 It handles the complete workflow: transcription → extraction → session management.
 """
 
+import logging
 import time
 from typing import TypedDict
 
 from .config import settings
-from .schemas import CanonicalV2, StreamResponse
 from .services.canonical import extract_with_claude
 from .services.session import session_manager
 from .services.transcription import transcribe_audio_chunk_whisper
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessChunkResult(TypedDict, total=False):
@@ -31,6 +33,8 @@ async def process_audio_chunk(
     session_id: str,
     dispatcher_id: str | None = None,
     update_convex: bool = True,
+    audio_content_type: str = "audio/webm",
+    audio_filename: str = "audio.webm",
 ) -> ProcessChunkResult:
     """
     Main function to process an audio chunk from an emergency call.
@@ -87,7 +91,9 @@ async def process_audio_chunk(
     session = session_manager.get_or_create_session(session_id)
     
     # Step 1: Transcribe audio chunk to text
-    chunk_text = await transcribe_audio_chunk_whisper(audio_chunk)
+    chunk_text = await transcribe_audio_chunk_whisper(
+        audio_chunk, content_type=audio_content_type, filename=audio_filename
+    )
     
     if not chunk_text:
         # Return current state if transcription produced no text
@@ -119,6 +125,9 @@ async def process_audio_chunk(
     convex_update_result = None
     if update_convex and settings.CONVEX_URL and dispatcher_id:
         try:
+            logger.info(
+                f"Updating Convex for session {session_id} (dispatcher: {dispatcher_id})"
+            )
             from .services.convex_db import get_convex_service
             
             convex = get_convex_service()
@@ -128,8 +137,9 @@ async def process_audio_chunk(
                 full_transcript=session.full_transcript,
                 dispatcher_id=dispatcher_id,
             )
+            logger.info(f"Convex update result: {convex_update_result}")
         except Exception as e:
-            print(f"Warning: Could not update Convex in real-time: {e}")
+            logger.error(f"Warning: Could not update Convex in real-time: {e}")
             convex_update_result = {"success": False, "error": str(e)}
     
     # Step 6: Build and return result
@@ -210,13 +220,18 @@ def end_session(
     # Save to Convex if enabled and configured
     if save_to_convex and settings.CONVEX_URL:
         if not dispatcher_id:
-            print("Warning: dispatcher_id required for Convex save. Skipping database save.")
+            logger.warning(
+                "dispatcher_id required for Convex save. Skipping database save."
+            )
             final_data["convex_save"] = {
                 "success": False,
                 "error": "dispatcher_id required"
             }
         else:
             try:
+                logger.info(
+                    f"Saving final call data to Convex for session {session_id}"
+                )
                 from .services.convex_db import get_convex_service
                 
                 convex = get_convex_service()
@@ -228,9 +243,10 @@ def end_session(
                     chunk_count=session.chunk_count,
                     dispatcher_id=dispatcher_id,
                 )
+                logger.info(f"Convex save result: {save_result}")
                 final_data["convex_save"] = save_result
             except Exception as e:
-                print(f"Warning: Could not save to Convex: {e}")
+                logger.error(f"Warning: Could not save to Convex: {e}")
                 final_data["convex_save"] = {"success": False, "error": str(e)}
     
     return final_data

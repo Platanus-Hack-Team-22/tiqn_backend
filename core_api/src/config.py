@@ -25,7 +25,7 @@ class Config(BaseSettings):
 
     # Anthropic Claude
     ANTHROPIC_API_KEY: str
-    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-20241022"
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-5"
 
 
 settings = Config()  # type: ignore
