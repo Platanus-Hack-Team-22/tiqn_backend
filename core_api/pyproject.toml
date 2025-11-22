@@ -1,16 +1,22 @@
 [project]
 name = "core-api"
 version = "0.1.0"
-description = "Add your description here"
+description = "Emergency services AI transcription and data extraction API"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.16.4",
+    "anthropic>=0.39.0",
+    "azure-cognitiveservices-speech>=1.47.0",
+    "convex>=0.7.0",
     "fastapi[standard]>=0.116.1",
     "google-genai>=1.27.0",
+    "httpx>=0.28.1",
+    "openai>=1.59.8",
     "psycopg>=3.2.9",
     "psycopg-binary>=3.2.9",
     "pydantic-settings>=2.10.1",
+    "python-multipart>=0.0.20",
     "sqlmodel>=0.0.24",
     "uvicorn>=0.35.0",
 ]
