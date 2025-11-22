@@ -51,8 +51,12 @@ async def twilio_stream_websocket(websocket: WebSocket):
     await websocket.accept()
     logger.info("WebSocket connection accepted")
 
-    # TODO: De-hardcode this. Ideally extract from query params or session context.
-    dispatcher_id = "js7crtvfa7c5ctm6j09q8n16sh7vwrtk"
+    # Extract dispatcher_id from query params
+    dispatcher_id = websocket.query_params.get("dispatcher_id")
+    if not dispatcher_id:
+        logger.warning("No dispatcher_id provided in query params. Using fallback.")
+        # Fallback for backward compatibility or testing
+        dispatcher_id = "js7crtvfa7c5ctm6j09q8n16sh7vwrtk"
 
     stream_sid = None
     audio_buffer = bytearray()
