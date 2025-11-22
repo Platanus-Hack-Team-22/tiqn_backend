@@ -53,9 +53,6 @@ jobs:
             echo 'HOST=${{ secrets.HOST }}' >> .env
             echo 'LOG_LEVEL=${{ secrets.LOG_LEVEL }}' >> .env
             echo 'PORT=${{ secrets.PORT }}' >> .env
-            echo 'SSH_IP=${{ secrets.SSH_IP }}' >> .env
-            echo 'SSH_PRIVATE_KEY=${{ secrets.SSH_PRIVATE_KEY }}' >> .env
-            echo 'SSH_USER=${{ secrets.SSH_USER }}' >> .env
 
             sudo docker build -t tiqn-backend .
             sudo docker run --env-file .env -d -p 80:8000 --name tiqn-backend-prod tiqn-backend
