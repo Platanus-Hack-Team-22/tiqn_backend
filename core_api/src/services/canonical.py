@@ -72,7 +72,7 @@ REGLAS DE TIPO Y FORMATO:
 - nombre/apellido: string, solo letras y espacios
 - sexo: "M" o "F" (si no se menciona: "")
 - edad: numeric string (solo dígitos, rango 0-150; si no se menciona: "")
-- direccion: string, nombre de calle sin artículos ni palabras irrelevantes
+- direccion: string, nombre de la calle o direccion, considera direcciones chilenas (como "los leones 100" o "avenida los leones cien")
 - numero: string, solo dígitos (ej: "123" no "Nº 123")
 - comuna: string, nombre formal de la comuna (ej: "Las Condes", "Providencia")
 - depto: string, referencias como "oficina 111", "depto 502" (si no se menciona: "")
