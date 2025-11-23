@@ -33,32 +33,45 @@ STREET_COMMUNE_HINTS = [
     (re.compile(r"\bgran avenida\b", re.I), "La Cisterna"),
 ]
 
-SYSTEM_PROMPT = """Eres un operador experto de tiqn. Debes completar la ficha SOS y los campos de seguimiento de una emergencia a partir de la transcripción.
+SYSTEM_PROMPT = """Eres un operador experto de tiqn (sistema de emergencias de Santiago, Chile). Tu tarea es extraer información estructurada de llamadas de emergencia y completar la ficha SOS.
 
-IMPORTANTE: Esta transcripción puede ser INCREMENTAL (solo un fragmento nuevo de una llamada en curso). Tu tarea es extraer SOLO la información nueva que aparece en este fragmento específico.
+CONTEXTO:
+- Las transcripciones son en español de Chile
+- Pueden ser fragmentos incrementales (solo información nueva de una llamada en curso)
+- Debes extraer ÚNICAMENTE datos mencionados EXPLÍCITAMENTE en el fragmento actual
+- Ignora especulaciones, suposiciones o inferencias
+- Los campos no relevantes deben quedar como cadena vacía ""
 
-Reglas estrictas:
-1. Extrae ÚNICAMENTE datos que se mencionan EXPLÍCITAMENTE en este fragmento
-2. Si no existe información confirmada, deja el campo como cadena vacía ""
-3. NO escribas "desconocido", "n/a" ni equivalentes - usa cadenas vacías ""
-4. Si en este fragmento no aparece ningún dato nuevo, devuelve todas las cadenas vacías
-5. Usa español de Chile
-
-Campos específicos:
-- direccion: solo nombre de calle (sin "emergencia", "ayuda", etc.)
-- numero: solo dígitos
-- comuna: nombre formal de la comuna
-- depto: referencias como "oficina 111", "departamento 502"
-- ubicacion_detalle: detalles del lugar ("gimnasio edificio", "cancha fútbol")
-- avdi: exactamente "alerta", "verbal", "dolor" o "inconsciente" (o "" si no se menciona)
-- estado_respiratorio: "respira" o "no respira" (o "" si no se menciona)
-- consciente/respira: "si" o "no" (o "" si no se menciona)
-- codigo: "Verde", "Amarillo" o "Rojo"
-- inicio_sintomas: expresiones como "súbito", "hace 2 horas" (o "" si no se menciona)
+REGLAS DE TIPO Y FORMATO:
+- nombre/apellido: string, solo letras y espacios
+- sexo: "M" o "F" (si no se menciona: "")
+- edad: numeric string (solo dígitos, rango 0-150; si no se menciona: "")
+- direccion: string, nombre de calle sin artículos ni palabras irrelevantes
+- numero: string, solo dígitos (ej: "123" no "Nº 123")
+- comuna: string, nombre formal de la comuna (ej: "Las Condes", "Providencia")
+- depto: string, referencias como "oficina 111", "depto 502" (si no se menciona: "")
+- ubicacion_referencia/ubicacion_detalle: string, detalles específicos (si no se menciona: "")
+- google_maps_url: string, generado automáticamente (DEJAR VACÍO, se genera después)
+- avdi: solo "alerta", "verbal", "dolor", "inconsciente" o "" (sin variaciones)
+- estado_respiratorio: solo "respira", "no respira" o "" (sin variaciones)
+- consciente/respira: solo "si", "no" o "" (sin variaciones)
+- codigo: "Verde", "Amarillo", "Rojo" o "Verde" (por defecto)
+- motivo: string, chief complaint/razón de llamada
+- inicio_sintomas: string, expresiones como "súbito", "hace 2 horas", "esta mañana"
 - cantidad_rescatistas/recursos_requeridos: solo si se solicitan explícitamente
-- campos médicos (historia_clinica, medicamentos, alergias, etc.): solo si se mencionan
+- historia_clinica/medicamentos/alergias/estado_basal/let_dnr/signos_vitales: solo si se mencionan
+- seguro_salud: string, nombre del seguro (si se menciona)
+- aviso_conserjeria: string, descripción de notificación al conserje (si se menciona)
+- checklist_url/medico_turno: vacío (""), se rellenan después
 
-Devuelve SOLO JSON plano, sin markdown."""
+REGLAS ESTRICTAS:
+1. NUNCA escribas "desconocido", "n/a", "no especificado" ni equivalentes - usa "" si no hay datos
+2. NUNCA incluyas campos con valores por defecto si no hay información confirmada
+3. NUNCA extraigas datos de fragmentos anteriores - solo del fragmento ACTUAL
+4. Si el fragmento no contiene información nueva, devuelve JSON con todos los campos vacíos
+5. Mantén coherencia con los datos ya extraídos (mostrados en contexto)
+
+Devuelve SOLO JSON válido, sin markdown, sin explicaciones, sin campos duplicados."""
 
 
 def build_user_prompt(

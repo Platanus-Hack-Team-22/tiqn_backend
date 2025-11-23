@@ -24,7 +24,14 @@ async def transcribe_audio_chunk_whisper(
         "model": "whisper-1",
         "language": "es",
         "response_format": "json",
-        "prompt": "Contexto: Servicio de emergencias Hatzalah Chile. El audio describe una emergencia y datos del paciente o solicitante. Usa español de Chile. Reconoce nombres y direcciones típicas de Santiago de Chile y comunas de la Región Metropolitana.",
+        "prompt": """Eres un asistente especializado en transcribir y procesar llamadas de emergencia del servicio Tiqn en Santiago de Chile.
+
+Contexto:
+- La llamada describe una emergencia y datos del paciente o solicitante
+- Usa siempre español de Chile
+- Reconoce nombres y direcciones típicas de Santiago de Chile y comunas de la Región Metropolitana
+
+IMPORTANTE: Solo incluye campos en la respuesta si hay información relevante extraída del audio. No incluyas campos vacíos o con valores por defecto.""",
     }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
