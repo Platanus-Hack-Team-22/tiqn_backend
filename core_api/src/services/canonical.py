@@ -1,6 +1,8 @@
 """Canonical data extraction using Claude."""
 
+import json
 import re
+from datetime import datetime
 
 from anthropic import AsyncAnthropic
 
@@ -179,17 +181,81 @@ async def extract_with_claude(
         return existing_canonical or CanonicalV2()
 
 
+def map_legacy_to_new_fields(data: CanonicalV2) -> CanonicalV2:
+    """Map legacy field names to new Convex schema field names."""
+    # Map legacy fields to new fields
+    if data.nombre and not data.firstName:
+        data.firstName = data.nombre
+    if data.apellido and not data.lastName:
+        data.lastName = data.apellido
+    if data.sexo and not data.patientSex:
+        data.patientSex = data.sexo
+    if data.edad and not data.patientAge:
+        try:
+            data.patientAge = int(data.edad)
+        except (ValueError, TypeError):
+            pass
+
+    if data.direccion and not data.address:
+        data.address = data.direccion
+    if data.numero and data.address and not data.address.endswith(data.numero):
+        data.address = f"{data.address} {data.numero}" if data.numero else data.address
+    if data.comuna and not data.district:
+        data.district = data.comuna
+    if data.depto and not data.apartment:
+        data.apartment = data.depto
+    if data.ubicacion_referencia and not data.reference:
+        data.reference = data.ubicacion_referencia
+
+    if data.consciente and not data.consciousness:
+        data.consciousness = data.consciente
+    if data.respira and not data.breathing:
+        data.breathing = data.respira
+    if data.estado_respiratorio and not data.respiratoryStatus:
+        data.respiratoryStatus = data.estado_respiratorio
+
+    if data.motivo and not data.description:
+        data.description = data.motivo
+    if data.inicio_sintomas and not data.symptomOnset:
+        data.symptomOnset = data.inicio_sintomas
+
+    if data.historia_clinica and not data.medicalHistory:
+        data.medicalHistory = data.historia_clinica
+    if data.medicamentos and not data.currentMedications:
+        data.currentMedications = data.medicamentos
+    if data.alergias and not data.allergies:
+        data.allergies = data.alergias
+
+    if data.signos_vitales and not data.vitalSigns:
+        data.vitalSigns = data.signos_vitales
+
+    if data.cantidad_rescatistas and not data.requiredRescuers:
+        data.requiredRescuers = data.cantidad_rescatistas
+    if data.recursos_requeridos and not data.requiredResources:
+        data.requiredResources = data.recursos_requeridos
+
+    if data.seguro_salud and not data.healthInsurance:
+        data.healthInsurance = data.seguro_salud
+    if data.aviso_conserjeria and not data.conciergeNotified:
+        data.conciergeNotified = data.aviso_conserjeria
+
+    return data
+
+
 def merge_canonical_data(existing: CanonicalV2, new_data: CanonicalV2) -> CanonicalV2:
     """Merge new canonical data with existing data."""
-    existing_dict = existing.model_dump()
-    new_dict = new_data.model_dump()
+    existing_dict = existing.model_dump(exclude_none=True)
+    new_dict = new_data.model_dump(exclude_none=True)
 
     # Update only non-empty fields
     for key, value in new_dict.items():
         if value and value != "Verde":  # Don't overwrite with empty or default values
             existing_dict[key] = value
 
-    return CanonicalV2(**existing_dict)
+    result = CanonicalV2(**existing_dict)
+    # Map legacy fields to new fields
+    result = map_legacy_to_new_fields(result)
+    return result
 
 
 def post_process_canonical(data: CanonicalV2, transcript: str) -> CanonicalV2:
@@ -264,6 +330,13 @@ def post_process_canonical(data: CanonicalV2, transcript: str) -> CanonicalV2:
     # Set motivo to full transcript if empty
     if not data.motivo:
         data.motivo = transcript[:500]  # Limit to first 500 chars
+
+    # Add timestamp for lastUpdated
+    if not data.lastUpdated:
+        data.lastUpdated = int(datetime.now().timestamp() * 1000)
+
+    # Map legacy fields to new schema
+    data = map_legacy_to_new_fields(data)
 
     return data
 
