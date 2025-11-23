@@ -2,12 +2,60 @@
 
 import asyncio
 import io
+import re
 from typing import AsyncGenerator
 
 import azure.cognitiveservices.speech as speechsdk
 import httpx
 
 from ..config import settings
+
+
+WHISPER_PROMPT = "Español de Chile. Emergencia. Nombres, direcciones, síntomas."
+
+
+def clean_whisper_output(text: str) -> str:
+    """
+    Clean up common Whisper hallucinations, especially during silence.
+    """
+    if not text:
+        return ""
+
+    # Normalize whitespace
+    text = text.strip()
+
+    # 1. Reject if it contains no alphanumeric characters (just punctuation/symbols)
+    if not re.search(r"[a-zA-Z0-9áéíóúñÁÉÍÓÚÑ]", text):
+        return ""
+
+    # 2. Check for prompt leakage
+    # If the text is a substring of the prompt (ignoring case/punctuation), it's likely a hallucination
+    text_norm = re.sub(r"[^\w\s]", "", text.lower())
+    prompt_norm = re.sub(r"[^\w\s]", "", WHISPER_PROMPT.lower())
+
+    if text_norm and text_norm in prompt_norm:
+        # Prevent false positives:
+        # "Emergencia" (valid) vs "Español de Chile" (leakage)
+        # Only reject if it consists of multiple words (likely a phrase from the prompt)
+        if len(text.split()) < 2:
+            return text
+        return ""
+
+    # 3. Known Whisper hallucinations / subtitle artifacts
+    hallucinations = [
+        "subtítulos por",
+        "transcripción realizada por",
+        "amara.org",
+        "mbc",
+        "tusubtitulo",
+    ]
+
+    lower_text = text.lower()
+    for h in hallucinations:
+        if h in lower_text:
+            return ""
+
+    return text
 
 
 async def transcribe_audio_chunk_whisper(
@@ -24,14 +72,7 @@ async def transcribe_audio_chunk_whisper(
         "model": "whisper-1",
         "language": "es",
         "response_format": "json",
-        "prompt": """Eres un asistente especializado en transcribir y procesar llamadas de emergencia del servicio Tiqn en Santiago de Chile.
-
-Contexto:
-- La llamada describe una emergencia y datos del paciente o solicitante
-- Usa siempre español de Chile
-- Reconoce nombres y direcciones típicas de Santiago de Chile y comunas de la Región Metropolitana
-
-IMPORTANTE: Solo incluye campos en la respuesta si hay información relevante extraída del audio. No incluyas campos vacíos o con valores por defecto.""",
+        "prompt": WHISPER_PROMPT,
     }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -48,7 +89,8 @@ IMPORTANTE: Solo incluye campos en la respuesta si hay información relevante ex
             raise ValueError(f"Transcription failed: {response.text}")
 
         result = response.json()
-        return result.get("text", "")
+        raw_text = result.get("text", "")
+        return clean_whisper_output(raw_text)
 
 
 async def transcribe_audio_stream_azure(
@@ -84,7 +126,6 @@ async def transcribe_audio_stream_azure(
     # Add emergency phrases for better recognition
     phrase_list = speechsdk.PhraseListGrammar.from_recognizer(recognizer)
     emergency_phrases = [
-        "tiqn",
         "emergencia",
         "ambulancia",
         "consciente",
@@ -94,7 +135,6 @@ async def transcribe_audio_stream_azure(
         "alerta",
         "verbal",
         "dolor",
-        "AVDI",
         "paciente",
         "direccion",
         "comuna",
@@ -105,6 +145,7 @@ async def transcribe_audio_stream_azure(
         "Ñuñoa",
         "Apoquindo",
         "Los Leones",
+        "MUT",
     ]
     for phrase in emergency_phrases:
         phrase_list.addPhrase(phrase)
