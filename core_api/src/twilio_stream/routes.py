@@ -16,8 +16,10 @@ logging.basicConfig(level=logging.INFO)
 SAMPLE_RATE = 8000
 CHANNELS = 1
 SAMPLE_WIDTH = 1  # 8-bit Mulaw
-CHUNK_DURATION_SEC = 5  # Process every 5 seconds
-CHUNK_SIZE = SAMPLE_RATE * SAMPLE_WIDTH * CHUNK_DURATION_SEC  # 40,000 bytes
+CHUNK_DURATION_SEC = 2.5  # Process every 2.5 seconds
+CHUNK_SIZE = int(SAMPLE_RATE * SAMPLE_WIDTH * CHUNK_DURATION_SEC)  # 20,000 bytes
+OVERLAP_DURATION_SEC = 0.5
+OVERLAP_SIZE = int(SAMPLE_RATE * SAMPLE_WIDTH * OVERLAP_DURATION_SEC)
 
 
 def create_wav_header(data_length: int) -> bytes:
@@ -62,6 +64,7 @@ async def twilio_stream_websocket(websocket: WebSocket):
 
     stream_sid = None
     audio_buffer = bytearray()
+    last_audio_tail = bytes()
     frame_count = 0
 
     try:
@@ -87,13 +90,23 @@ async def twilio_stream_websocket(websocket: WebSocket):
                     # Process if buffer exceeds chunk size
                     if len(audio_buffer) >= CHUNK_SIZE:
                         logger.info(
-                            f"Processing audio chunk: {len(audio_buffer)} bytes"
+                            f"Processing audio chunk: {len(audio_buffer)} bytes (plus {len(last_audio_tail)} bytes overlap)"
                         )
 
                         if stream_sid:
+                            # Combine with overlap
+                            audio_to_send = last_audio_tail + audio_buffer
+
+                            # Save tail for next chunk
+                            if len(audio_buffer) >= OVERLAP_SIZE:
+                                last_audio_tail = bytes(audio_buffer[-OVERLAP_SIZE:])
+                            else:
+                                # If buffer is somehow smaller than overlap (unlikely given check above), keep everything
+                                last_audio_tail = bytes(audio_buffer)
+
                             # Create WAV container
                             wav_data = (
-                                create_wav_header(len(audio_buffer)) + audio_buffer
+                                create_wav_header(len(audio_to_send)) + audio_to_send
                             )
 
                             try:
