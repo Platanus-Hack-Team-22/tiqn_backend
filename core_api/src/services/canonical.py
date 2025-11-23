@@ -33,13 +33,13 @@ STREET_COMMUNE_HINTS = [
     (re.compile(r"\bgran avenida\b", re.I), "La Cisterna"),
 ]
 
-SYSTEM_PROMPT = """Eres un operador experto de Hatzalah Chile. Debes completar la ficha SOS y los campos de seguimiento de una emergencia a partir de la transcripción.
+SYSTEM_PROMPT = """Eres un operador experto de tiqn. Debes completar la ficha SOS y los campos de seguimiento de una emergencia a partir de la transcripción.
 
 IMPORTANTE: Esta transcripción puede ser INCREMENTAL (solo un fragmento nuevo de una llamada en curso). Tu tarea es extraer SOLO la información nueva que aparece en este fragmento específico.
 
 Reglas estrictas:
 1. Extrae ÚNICAMENTE datos que se mencionan EXPLÍCITAMENTE en este fragmento
-2. Si no existe información confirmada, deja el campo como cadena vacía "" 
+2. Si no existe información confirmada, deja el campo como cadena vacía ""
 3. NO escribas "desconocido", "n/a" ni equivalentes - usa cadenas vacías ""
 4. Si en este fragmento no aparece ningún dato nuevo, devuelve todas las cadenas vacías
 5. Usa español de Chile
@@ -61,9 +61,11 @@ Campos específicos:
 Devuelve SOLO JSON plano, sin markdown."""
 
 
-def build_user_prompt(transcript_chunk: str, existing_data: CanonicalV2 | None = None) -> str:
+def build_user_prompt(
+    transcript_chunk: str, existing_data: CanonicalV2 | None = None
+) -> str:
     """Build the user prompt for Claude."""
-    
+
     context = ""
     if existing_data:
         # Show existing data as context
@@ -71,7 +73,7 @@ def build_user_prompt(transcript_chunk: str, existing_data: CanonicalV2 | None =
         filled_fields = {k: v for k, v in existing_dict.items() if v and v != "Verde"}
         if filled_fields:
             context = f"\n\nDatos ya extraídos en fragmentos anteriores:\n{json.dumps(filled_fields, ensure_ascii=False, indent=2)}\n"
-    
+
     return f"""Fragmento de transcripción (es-CL):{context}
 
 Transcripción actual:
@@ -119,45 +121,43 @@ async def extract_with_claude(
     existing_canonical: CanonicalV2 | None = None,
 ) -> CanonicalV2:
     """Extract canonical data from transcript chunk using Claude."""
-    
+
     client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    
+
     user_prompt = build_user_prompt(transcript_chunk, existing_canonical)
-    
+
     try:
         message = client.messages.create(
             model=settings.ANTHROPIC_MODEL,
             max_tokens=2048,
             temperature=0,
             system=SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": user_prompt}
-            ],
+            messages=[{"role": "user", "content": user_prompt}],
         )
-        
+
         # Extract JSON from response
         content = message.content[0].text if message.content else ""
-        
+
         # Parse JSON
         canonical_dict = parse_json_response(content)
         if not canonical_dict:
             # If parsing failed, return existing or default
             return existing_canonical or CanonicalV2()
-        
+
         # Create new canonical object
         new_canonical = CanonicalV2(**canonical_dict)
-        
+
         # Merge with existing data
         if existing_canonical:
             merged = merge_canonical_data(existing_canonical, new_canonical)
         else:
             merged = new_canonical
-        
+
         # Post-process
         merged = post_process_canonical(merged, transcript_chunk)
-        
+
         return merged
-        
+
     except Exception as e:
         print(f"Error extracting with Claude: {e}")
         return existing_canonical or CanonicalV2()
@@ -168,16 +168,16 @@ def parse_json_response(text: str) -> dict[str, Any] | None:
     # Remove markdown code blocks
     text = re.sub(r"```(?:json)?\s*", "", text)
     text = text.strip()
-    
+
     # Find JSON object
     first_brace = text.find("{")
     last_brace = text.rfind("}")
-    
+
     if first_brace == -1 or last_brace == -1:
         return None
-    
+
     json_text = text[first_brace : last_brace + 1]
-    
+
     try:
         return json.loads(json_text)
     except json.JSONDecodeError:
@@ -188,44 +188,50 @@ def merge_canonical_data(existing: CanonicalV2, new_data: CanonicalV2) -> Canoni
     """Merge new canonical data with existing data."""
     existing_dict = existing.model_dump()
     new_dict = new_data.model_dump()
-    
+
     # Update only non-empty fields
     for key, value in new_dict.items():
         if value and value != "Verde":  # Don't overwrite with empty or default values
             existing_dict[key] = value
-    
+
     return CanonicalV2(**existing_dict)
 
 
 def post_process_canonical(data: CanonicalV2, transcript: str) -> CanonicalV2:
     """Post-process canonical data for cleanup and inference."""
-    
+
     # Sanitize address
     data.direccion = sanitize_direccion(data.direccion)
     data.numero = re.sub(r"[^0-9]", "", data.numero)
     data.comuna = sanitize_comuna(data.comuna)
-    
+
     # Capitalize names
     data.nombre = capitalize_words(data.nombre)
     data.apellido = capitalize_words(data.apellido)
     data.medico_turno = capitalize_words(data.medico_turno)
-    
+
     # Normalize medical fields
     data.sexo = normalize_sexo(data.sexo, transcript)
     data.edad = normalize_edad(data.edad, transcript)
     data.codigo = normalize_codigo(data.codigo, transcript)
     data.avdi = normalize_avdi(data.avdi, data.consciente, transcript)
-    data.estado_respiratorio = normalize_respiratorio(data.estado_respiratorio, data.respira, transcript)
+    data.estado_respiratorio = normalize_respiratorio(
+        data.estado_respiratorio, data.respira, transcript
+    )
     data.consciente = normalize_yes_no(data.consciente)
     data.respira = normalize_yes_no(data.respira)
-    
+
     # Infer comuna from street name if not set
-    if not data.comuna or data.comuna.lower() in ["santiago", "región metropolitana", "rm"]:
+    if not data.comuna or data.comuna.lower() in [
+        "santiago",
+        "región metropolitana",
+        "rm",
+    ]:
         for pattern, comuna in STREET_COMMUNE_HINTS:
             if pattern.search(data.direccion):
                 data.comuna = comuna
                 break
-    
+
     # Extract address from text if missing
     if not data.direccion or not data.numero:
         extracted = extract_address_from_text(transcript)
@@ -237,23 +243,33 @@ def post_process_canonical(data: CanonicalV2, transcript: str) -> CanonicalV2:
             data.comuna = sanitize_comuna(extracted["comuna"])
         if not data.depto and extracted["extra"]:
             data.depto = extracted["extra"]
-    
+
     # Generate Google Maps URL
     if data.direccion or data.numero or data.comuna:
         query_parts = [data.direccion, data.numero, data.comuna, "Santiago, Chile"]
         query = ", ".join(p for p in query_parts if p)
-        data.google_maps_url = f"https://www.google.com/maps/search/?api=1&query={query}"
-    
+        data.google_maps_url = (
+            f"https://www.google.com/maps/search/?api=1&query={query}"
+        )
+
     # Infer from first-person speech
-    if not data.consciente and is_first_person(transcript) and "inconsciente" not in transcript.lower():
+    if (
+        not data.consciente
+        and is_first_person(transcript)
+        and "inconsciente" not in transcript.lower()
+    ):
         data.consciente = "si"
-    if not data.respira and is_first_person(transcript) and "no respira" not in transcript.lower():
+    if (
+        not data.respira
+        and is_first_person(transcript)
+        and "no respira" not in transcript.lower()
+    ):
         data.respira = "si"
-    
+
     # Set motivo to full transcript if empty
     if not data.motivo:
         data.motivo = transcript[:500]  # Limit to first 500 chars
-    
+
     return data
 
 
@@ -393,17 +409,17 @@ def extract_address_from_text(text: str) -> dict[str, str]:
     normalized = re.sub(r"\s+", " ", text)
     pattern = r"(?:vivo en|estoy en|estamos en|la dirección es|mi direccion es|nos encontramos en|ubicado en)\s+([^\.\!\?]+)"
     match = re.search(pattern, normalized, re.I)
-    
+
     if not match:
         return {"direccion": "", "numero": "", "comuna": "", "extra": ""}
-    
+
     segment = match.group(1)
     detail_pattern = r"([A-Za-zÁÉÍÓÚÑáéíóúñ' ]+?)\s*(\d{1,6})(?:\s*((?:oficina|departamento|depto|piso)\s*[A-Za-z0-9-]+))?(?:\s*(?:,|en\s+la\s+comuna\s+de|comuna)\s*([A-Za-zÁÉÍÓÚÑáéíóúñ' ]+))?"
     detail_match = re.search(detail_pattern, segment, re.I)
-    
+
     if not detail_match:
         return {"direccion": "", "numero": "", "comuna": "", "extra": ""}
-    
+
     return {
         "direccion": detail_match.group(1).strip() if detail_match.group(1) else "",
         "numero": detail_match.group(2).strip() if detail_match.group(2) else "",
@@ -414,6 +430,8 @@ def extract_address_from_text(text: str) -> dict[str, str]:
 
 def is_first_person(text: str) -> bool:
     """Check if text contains first-person speech."""
-    return bool(re.search(r"\b(soy|estoy|necesito|me\s+llamo|hablo|vivo|puedo|llamando)\b", text, re.I))
-
-
+    return bool(
+        re.search(
+            r"\b(soy|estoy|necesito|me\s+llamo|hablo|vivo|puedo|llamando)\b", text, re.I
+        )
+    )

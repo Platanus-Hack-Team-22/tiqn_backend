@@ -1,7 +1,7 @@
 # TIQN Emergency Services API
 
 TO RUN uv run fastapi dev src/main.py
-FastAPI backend for real-time audio transcription and emergency data extraction for Hatzalah Chile.
+FastAPI backend for real-time audio transcription and emergency data extraction for Tiqn.
 
 a
 
@@ -333,10 +333,6 @@ uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
 - Verify Anthropic API key is valid
 - Check API rate limits
 - Review Claude model name
-
-## License
-
-Proprietary - Hatzalah Chile
 
 ## Support
 
