@@ -211,6 +211,60 @@ class ConvexService:
             print(f"Error listing incidents: {e}")
             return []
     
+    def update_interim_transcript(
+        self,
+        session_id: str,
+        live_transcript: str,
+        dispatcher_id: str,
+    ) -> dict[str, Any]:
+        """
+        Update only the live transcript in Convex (for interim results).
+
+        This is a lightweight update that only sends the current interim transcript
+        without triggering Claude extraction. Used for real-time display.
+
+        Args:
+            session_id: Unique session identifier (becomes externalCallId)
+            live_transcript: Current live transcript (finalized + interim)
+            dispatcher_id: ID of the dispatcher handling the call
+
+        Returns:
+            Dict with success status and incident_id
+        """
+        try:
+            # Minimal update payload - just the live transcript
+            update_data = {
+                "externalCallId": session_id,
+                "dispatcherId": dispatcher_id,
+                "liveTranscript": live_transcript,  # Real-time updating field
+                "status": "active",  # Keep incident active
+            }
+
+            # Call Convex mutation (creates if doesn't exist, updates if it does)
+            logger.debug(f"Updating interim transcript for session {session_id}")
+            incident_id = self.client.mutation("incidents:createOrUpdate", update_data)
+
+            # Update app_state to track this as the active incident
+            try:
+                self.client.mutation("app_state:setActiveIncident", {"incidentId": incident_id})
+            except Exception as e:
+                logger.warning(f"Failed to set active incident in app_state: {e}")
+
+            return {
+                "success": True,
+                "incident_id": incident_id,
+                "session_id": session_id,
+                "type": "interim",
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to update interim transcript in Convex: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "type": "interim",
+            }
+
     def update_incident_realtime(
         self,
         session_id: str,
@@ -289,6 +343,7 @@ class ConvexService:
                 
                 # Complete data
                 "fullTranscript": full_transcript,
+                "liveTranscript": full_transcript,  # Keep in sync with fullTranscript on finals
                 "rawCanonicalData": canonical.model_dump(),
             }
             

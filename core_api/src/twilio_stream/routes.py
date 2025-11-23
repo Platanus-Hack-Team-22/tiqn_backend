@@ -7,6 +7,7 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..core import end_session, process_text_chunk
+from ..services.session import session_manager
 from ..services.transcription import transcribe_audio_stream_azure
 
 router = APIRouter()
@@ -48,25 +49,81 @@ async def twilio_stream_websocket(websocket: WebSocket):
     async def process_transcriptions(session_id: str) -> None:
         """Process transcription results from Azure Speech SDK."""
         try:
+            # Get session for interim tracking
+            session = session_manager.get_or_create_session(session_id)
+
             # Start Azure Speech recognition with streaming audio
+            # TUNING: Adjust segmentation_silence_ms for different noise levels:
+            # - 500ms: Very noisy (emergency scenes, sirens, traffic)
+            # - 700ms: Moderate noise (default, good balance)
+            # - 1000ms: Quiet environment (clean audio)
             async for text, is_final in transcribe_audio_stream_azure(
                 audio_stream=audio_stream_generator(),
                 session_id=session_id,
                 audio_format="mulaw",  # Twilio sends Mu-law encoded audio
+                segmentation_silence_ms=700,  # Adjust based on noise level
             ):
-                # Only process final results (ignore interim results)
-                if is_final and text:
+                if not text:
+                    continue
+
+                if is_final:
+                    # Process final results through full pipeline
                     logger.info(f"Final transcription: {text}")
                     try:
-                        # Process the transcribed text
-                        await process_text_chunk(
+                        result = await process_text_chunk(
                             chunk_text=text,
                             session_id=session_id,
                             dispatcher_id=dispatcher_id,
                             update_convex=True,
                         )
+
+                        # Send final result to frontend via WebSocket
+                        try:
+                            await websocket.send_json({
+                                "type": "final_transcript",
+                                "text": text,
+                                "canonical": result["canonical"],
+                                "session_id": session_id,
+                            })
+                        except Exception as ws_error:
+                            logger.warning(f"WebSocket send failed: {ws_error}")
+
                     except Exception as e:
                         logger.error(f"Error processing transcription: {e}")
+                else:
+                    # REAL-TIME INTERIM UPDATES
+                    # Update session's live transcript
+                    transcript_changed = session.update_interim_transcript(text)
+
+                    if transcript_changed:
+                        logger.debug(f"Interim transcription: {text}")
+
+                        # Send to Convex for real-time display
+                        try:
+                            from ..services.convex_db import get_convex_service
+                            convex = get_convex_service()
+
+                            # Run in thread pool (Convex client is sync)
+                            await asyncio.to_thread(
+                                convex.update_interim_transcript,
+                                session_id=session_id,
+                                live_transcript=session.live_transcript,
+                                dispatcher_id=dispatcher_id,
+                            )
+                        except Exception as convex_error:
+                            logger.debug(f"Convex interim update failed: {convex_error}")
+
+                        # Also send via WebSocket for immediate feedback
+                        try:
+                            await websocket.send_json({
+                                "type": "interim_transcript",
+                                "text": text,
+                                "live_transcript": session.live_transcript,
+                                "session_id": session_id,
+                            })
+                        except Exception as ws_error:
+                            logger.debug(f"WebSocket send failed for interim: {ws_error}")
+
         except Exception as e:
             logger.error(f"Error in transcription processing: {e}")
 

@@ -8,10 +8,28 @@ import azure.cognitiveservices.speech as speechsdk
 from ..config import settings
 
 
+# Preset configurations for different noise environments
+NOISE_PRESETS = {
+    "quiet": {
+        "segmentation_silence_ms": 1000,  # More patient in quiet environments
+        "description": "Clean environment (office, home)",
+    },
+    "moderate": {
+        "segmentation_silence_ms": 700,  # Balanced (default)
+        "description": "Some background noise (street, cafe)",
+    },
+    "noisy": {
+        "segmentation_silence_ms": 500,  # Aggressive finalization
+        "description": "High background noise (emergency scene, traffic)",
+    },
+}
+
+
 async def transcribe_audio_stream_azure(
     audio_stream: AsyncGenerator[bytes, None],
     session_id: str,
     audio_format: str = "mulaw",
+    segmentation_silence_ms: int = 700,
 ) -> AsyncGenerator[tuple[str, bool], None]:
     """
     Transcribe audio stream using Azure Speech SDK.
@@ -20,6 +38,9 @@ async def transcribe_audio_stream_azure(
         audio_stream: AsyncGenerator yielding audio bytes
         session_id: Unique session identifier for logging
         audio_format: Audio format - "mulaw" for Twilio (8kHz Mu-law) or "pcm16" for standard PCM
+        segmentation_silence_ms: Milliseconds of silence before finalizing (default: 700ms)
+                                 Lower = faster finalization, better for noisy environments
+                                 Higher = more patient, waits longer for continuation
 
     Yields tuples of (text, is_final).
     """
@@ -35,6 +56,46 @@ async def transcribe_audio_stream_azure(
         region=settings.AZURE_SPEECH_REGION,
     )
     speech_config.speech_recognition_language = "es-CL"
+
+    # OPTIMIZATION: Configure for better noise tolerance and faster finalization
+
+    # 1. Segmentation settings - make it more aggressive about finalizing
+    # Lower values = faster finalization (better for noisy environments)
+    # Default is ~1000ms, we use 700ms for emergency contexts
+    speech_config.set_property(
+        speechsdk.PropertyId.Speech_SegmentationSilenceTimeoutMs,
+        str(segmentation_silence_ms)
+    )
+
+    # 2. Initial silence timeout - how long to wait for speech to start (15 seconds)
+    speech_config.set_property(
+        speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "15000"
+    )
+
+    # 3. End silence timeout - similar to segmentation, helps with noisy environments
+    speech_config.set_property(
+        speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs,
+        str(segmentation_silence_ms)
+    )
+
+    # 4. Enable audio processing for noise suppression
+    # This helps Azure better distinguish speech from background noise
+    speech_config.set_property(
+        speechsdk.PropertyId.SpeechServiceConnection_EnableAudioLogging, "false"
+    )
+
+    # 5. Set VAD (Voice Activity Detection) to be more aggressive
+    # This makes it better at detecting speech even with background noise
+    # Values: 0 (conservative) to 2 (aggressive)
+    speech_config.set_property(
+        speechsdk.PropertyId.SpeechServiceResponse_RequestWordLevelTimestamps, "true"
+    )
+
+    # 6. Profanity filter off (for emergency contexts)
+    speech_config.set_profanity(speechsdk.ProfanityOption.Raw)
+
+    # 7. Enable detailed results for better accuracy tracking
+    speech_config.output_format = speechsdk.OutputFormat.Detailed
 
     # Configure audio format based on input type
     if audio_format == "mulaw":

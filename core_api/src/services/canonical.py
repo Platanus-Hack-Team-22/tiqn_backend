@@ -4,10 +4,21 @@ import json
 import re
 from typing import Any
 
-from anthropic import Anthropic
+from anthropic import AsyncAnthropic
 
 from ..config import settings
 from ..schemas import CanonicalV2
+
+# Global async client for connection reuse
+_anthropic_client: AsyncAnthropic | None = None
+
+
+def get_anthropic_client() -> AsyncAnthropic:
+    """Get or create the global async Anthropic client."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    return _anthropic_client
 
 # Street to commune mapping for Santiago, Chile
 STREET_COMMUNE_HINTS = [
@@ -135,12 +146,12 @@ async def extract_with_claude(
 ) -> CanonicalV2:
     """Extract canonical data from transcript chunk using Claude."""
 
-    client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    client = get_anthropic_client()
 
     user_prompt = build_user_prompt(transcript_chunk, existing_canonical)
 
     try:
-        message = client.messages.create(
+        message = await client.messages.create(
             model=settings.ANTHROPIC_MODEL,
             max_tokens=2048,
             temperature=0,
