@@ -1,55 +1,26 @@
+import asyncio
 import base64
 import json
 import logging
-import struct
+from typing import AsyncGenerator
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from ..core import end_session, process_audio_chunk
+from ..core import end_session, process_text_chunk
+from ..services.transcription import transcribe_audio_stream_azure
 
 router = APIRouter()
 
 logger = logging.getLogger("twilio_stream")
 logging.basicConfig(level=logging.INFO)
 
-# Constants for Audio Processing
-SAMPLE_RATE = 8000
-CHANNELS = 1
-SAMPLE_WIDTH = 1  # 8-bit Mulaw
-CHUNK_DURATION_SEC = 2.5  # Process every 2.5 seconds
-CHUNK_SIZE = int(SAMPLE_RATE * SAMPLE_WIDTH * CHUNK_DURATION_SEC)  # 20,000 bytes
-OVERLAP_DURATION_SEC = 0.5
-OVERLAP_SIZE = int(SAMPLE_RATE * SAMPLE_WIDTH * OVERLAP_DURATION_SEC)
-
-
-def create_wav_header(data_length: int) -> bytes:
-    """
-    Create a WAV header for 8kHz Mu-Law Mono audio.
-    """
-    # RIFF Chunk
-    header = b"RIFF"
-    header += struct.pack("<I", 36 + data_length)  # ChunkSize
-    header += b"WAVE"
-
-    # fmt Chunk
-    header += b"fmt "
-    header += struct.pack("<I", 16)  # Subchunk1Size (16 for PCM/Mulaw)
-    header += struct.pack("<H", 7)  # AudioFormat (7 = MULAW)
-    header += struct.pack("<H", CHANNELS)  # NumChannels
-    header += struct.pack("<I", SAMPLE_RATE)  # SampleRate
-    header += struct.pack("<I", SAMPLE_RATE * CHANNELS * SAMPLE_WIDTH)  # ByteRate
-    header += struct.pack("<H", CHANNELS * SAMPLE_WIDTH)  # BlockAlign
-    header += struct.pack("<H", 8)  # BitsPerSample (8 for Mulaw)
-
-    # data Chunk
-    header += b"data"
-    header += struct.pack("<I", data_length)  # Subchunk2Size
-
-    return header
-
 
 @router.websocket("/twilio-stream")
 async def twilio_stream_websocket(websocket: WebSocket):
+    """
+    WebSocket endpoint for Twilio Media Streams.
+    Uses Azure Speech SDK for real-time continuous recognition.
+    """
     await websocket.accept()
     logger.info("WebSocket connection accepted")
 
@@ -57,15 +28,49 @@ async def twilio_stream_websocket(websocket: WebSocket):
     dispatcher_id = websocket.query_params.get("dispatcher_id")
     if not dispatcher_id:
         logger.warning("No dispatcher_id provided in query params. Using fallback.")
-        # Fallback for backward compatibility or testing
         dispatcher_id = "js7crtvfa7c5ctm6j09q8n16sh7vwrtk"
 
     logger.info(f"Using dispatcher_id: {dispatcher_id}")
 
     stream_sid = None
-    audio_buffer = bytearray()
-    last_audio_tail = bytes()
     frame_count = 0
+    audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+    async def audio_stream_generator() -> AsyncGenerator[bytes, None]:
+        """Generate audio chunks from the queue for Azure Speech SDK."""
+        while True:
+            chunk = await audio_queue.get()
+            if chunk is None:
+                logger.info("Audio stream ended")
+                break
+            yield chunk
+
+    async def process_transcriptions(session_id: str) -> None:
+        """Process transcription results from Azure Speech SDK."""
+        try:
+            # Start Azure Speech recognition with streaming audio
+            async for text, is_final in transcribe_audio_stream_azure(
+                audio_stream=audio_stream_generator(),
+                session_id=session_id,
+                audio_format="mulaw",  # Twilio sends Mu-law encoded audio
+            ):
+                # Only process final results (ignore interim results)
+                if is_final and text:
+                    logger.info(f"Final transcription: {text}")
+                    try:
+                        # Process the transcribed text
+                        await process_text_chunk(
+                            chunk_text=text,
+                            session_id=session_id,
+                            dispatcher_id=dispatcher_id,
+                            update_convex=True,
+                        )
+                    except Exception as e:
+                        logger.error(f"Error processing transcription: {e}")
+        except Exception as e:
+            logger.error(f"Error in transcription processing: {e}")
+
+    transcription_task = None
 
     try:
         while True:
@@ -80,80 +85,47 @@ async def twilio_stream_websocket(websocket: WebSocket):
                 stream_sid = data.get("start", {}).get("streamSid")
                 logger.info(f"Media Stream started. Stream SID: {stream_sid}")
 
+                # Start transcription processing in background
+                if stream_sid:
+                    transcription_task = asyncio.create_task(
+                        process_transcriptions(stream_sid)
+                    )
+                    logger.info("Started Azure Speech recognition task")
+
             elif event_type == "media":
                 payload = data.get("media", {}).get("payload")
                 if payload:
+                    # Decode Twilio's base64-encoded audio
                     chunk = base64.b64decode(payload)
-                    audio_buffer.extend(chunk)
+                    # Feed directly to Azure Speech SDK (no buffering)
+                    await audio_queue.put(chunk)
                     frame_count += 1
 
-                    # Process if buffer exceeds chunk size
-                    if len(audio_buffer) >= CHUNK_SIZE:
-                        logger.info(
-                            f"Processing audio chunk: {len(audio_buffer)} bytes (plus {len(last_audio_tail)} bytes overlap)"
-                        )
-
-                        if stream_sid:
-                            # Combine with overlap
-                            audio_to_send = last_audio_tail + audio_buffer
-
-                            # Save tail for next chunk
-                            if len(audio_buffer) >= OVERLAP_SIZE:
-                                last_audio_tail = bytes(audio_buffer[-OVERLAP_SIZE:])
-                            else:
-                                # If buffer is somehow smaller than overlap (unlikely given check above), keep everything
-                                last_audio_tail = bytes(audio_buffer)
-
-                            # Create WAV container
-                            wav_data = (
-                                create_wav_header(len(audio_to_send)) + audio_to_send
-                            )
-
-                            try:
-                                # Process audio chunk
-                                await process_audio_chunk(
-                                    audio_chunk=bytes(wav_data),
-                                    session_id=stream_sid,
-                                    dispatcher_id=dispatcher_id,
-                                    update_convex=True,
-                                    audio_content_type="audio/wav",
-                                    audio_filename="audio.wav",
-                                )
-                            except Exception as e:
-                                logger.error(f"Error processing audio chunk: {e}")
-
-                        # Reset buffer
-                        audio_buffer = bytearray()
-
             elif event_type == "stop":
-                logger.info(
-                    f"Media Stream stopped. Total frames received: {frame_count}"
-                )
-                # Process remaining audio if any
-                if len(audio_buffer) > 0 and stream_sid:
-                    logger.info(
-                        f"Processing final audio chunk: {len(audio_buffer)} bytes"
-                    )
-                    wav_data = create_wav_header(len(audio_buffer)) + audio_buffer
-                    try:
-                        await process_audio_chunk(
-                            audio_chunk=bytes(wav_data),
-                            session_id=stream_sid,
-                            dispatcher_id=dispatcher_id,
-                            update_convex=True,
-                            audio_content_type="audio/wav",
-                            audio_filename="audio.wav",
-                        )
-                    except Exception as e:
-                        logger.error(f"Error processing final audio chunk: {e}")
-
+                logger.info(f"Media Stream stopped. Total frames received: {frame_count}")
+                # Signal end of audio stream
+                await audio_queue.put(None)
                 break
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected. Total frames received: {frame_count}")
+        # Signal end of audio stream
+        await audio_queue.put(None)
     except Exception as e:
         logger.error(f"Error in WebSocket handler: {e}")
+        await audio_queue.put(None)
     finally:
+        # Wait for transcription task to complete
+        if transcription_task:
+            try:
+                await asyncio.wait_for(transcription_task, timeout=5.0)
+                logger.info("Transcription task completed")
+            except asyncio.TimeoutError:
+                logger.warning("Transcription task timeout, canceling")
+                transcription_task.cancel()
+            except Exception as e:
+                logger.error(f"Error waiting for transcription task: {e}")
+
         # Cleanup and save session
         if stream_sid:
             logger.info(f"Ending session for Stream SID: {stream_sid}")

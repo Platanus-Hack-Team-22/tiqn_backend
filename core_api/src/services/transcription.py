@@ -1,107 +1,30 @@
-"""Audio transcription services using Azure Speech and OpenAI Whisper."""
+"""Audio transcription services using Azure Speech SDK."""
 
 import asyncio
-import io
-import re
 from typing import AsyncGenerator
 
 import azure.cognitiveservices.speech as speechsdk
-import httpx
 
 from ..config import settings
-
-
-WHISPER_PROMPT = "Español de Chile. Emergencia. Nombres, direcciones, síntomas."
-
-
-def clean_whisper_output(text: str) -> str:
-    """
-    Clean up common Whisper hallucinations, especially during silence.
-    """
-    if not text:
-        return ""
-
-    # Normalize whitespace
-    text = text.strip()
-
-    # 1. Reject if it contains no alphanumeric characters (just punctuation/symbols)
-    if not re.search(r"[a-zA-Z0-9áéíóúñÁÉÍÓÚÑ]", text):
-        return ""
-
-    # 2. Check for prompt leakage
-    # If the text is a substring of the prompt (ignoring case/punctuation), it's likely a hallucination
-    text_norm = re.sub(r"[^\w\s]", "", text.lower())
-    prompt_norm = re.sub(r"[^\w\s]", "", WHISPER_PROMPT.lower())
-
-    if text_norm and text_norm in prompt_norm:
-        # Prevent false positives:
-        # "Emergencia" (valid) vs "Español de Chile" (leakage)
-        # Only reject if it consists of multiple words (likely a phrase from the prompt)
-        if len(text.split()) < 2:
-            return text
-        return ""
-
-    # 3. Known Whisper hallucinations / subtitle artifacts
-    hallucinations = [
-        "subtítulos por",
-        "transcripción realizada por",
-        "amara.org",
-        "mbc",
-        "tusubtitulo",
-    ]
-
-    lower_text = text.lower()
-    for h in hallucinations:
-        if h in lower_text:
-            return ""
-
-    return text
-
-
-async def transcribe_audio_chunk_whisper(
-    audio_data: bytes, content_type: str = "audio/webm", filename: str = "audio.webm"
-) -> str:
-    """Transcribe audio chunk using Azure OpenAI Whisper."""
-
-    if not settings.AZURE_OPENAI_API_KEY or not settings.AZURE_OPENAI_TRANSCRIBE_URL:
-        raise ValueError("Azure OpenAI credentials not configured")
-
-    # Create form data
-    files = {"file": (filename, io.BytesIO(audio_data), content_type)}
-    data = {
-        "model": "whisper-1",
-        "language": "es",
-        "response_format": "json",
-        "prompt": WHISPER_PROMPT,
-    }
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            settings.AZURE_OPENAI_TRANSCRIBE_URL,
-            files=files,
-            data=data,
-            headers={
-                "api-key": settings.AZURE_OPENAI_API_KEY,
-            },
-        )
-
-        if response.status_code != 200:
-            raise ValueError(f"Transcription failed: {response.text}")
-
-        result = response.json()
-        raw_text = result.get("text", "")
-        return clean_whisper_output(raw_text)
 
 
 async def transcribe_audio_stream_azure(
     audio_stream: AsyncGenerator[bytes, None],
     session_id: str,
+    audio_format: str = "mulaw",
 ) -> AsyncGenerator[tuple[str, bool], None]:
     """
     Transcribe audio stream using Azure Speech SDK.
 
+    Args:
+        audio_stream: AsyncGenerator yielding audio bytes
+        session_id: Unique session identifier for logging
+        audio_format: Audio format - "mulaw" for Twilio (8kHz Mu-law) or "pcm16" for standard PCM
+
     Yields tuples of (text, is_final).
     """
+    import logging
+    logger = logging.getLogger(__name__)
 
     if not settings.AZURE_SPEECH_KEY or not settings.AZURE_SPEECH_REGION:
         raise ValueError("Azure Speech credentials not configured")
@@ -113,8 +36,25 @@ async def transcribe_audio_stream_azure(
     )
     speech_config.speech_recognition_language = "es-CL"
 
-    # Create push stream
-    push_stream = speechsdk.audio.PushAudioInputStream()
+    # Configure audio format based on input type
+    if audio_format == "mulaw":
+        # Twilio sends 8kHz Mu-law mono
+        stream_format = speechsdk.audio.AudioStreamFormat(
+            samples_per_second=8000,
+            bits_per_sample=16,  # Azure expects 16-bit after Mu-law decompression
+            channels=1,
+            wave_stream_format=speechsdk.AudioStreamWaveFormat.MULAW,
+        )
+    else:
+        # Standard 16kHz PCM mono (default for most applications)
+        stream_format = speechsdk.audio.AudioStreamFormat(
+            samples_per_second=16000,
+            bits_per_sample=16,
+            channels=1,
+        )
+
+    # Create push stream with explicit format
+    push_stream = speechsdk.audio.PushAudioInputStream(stream_format=stream_format)
     audio_config = speechsdk.audio.AudioConfig(stream=push_stream)
 
     # Create recognizer
@@ -153,39 +93,65 @@ async def transcribe_audio_stream_azure(
     # Results queue
     results_queue: asyncio.Queue[tuple[str, bool] | None] = asyncio.Queue()
 
-    # Event handlers
+    # Get the event loop for thread-safe task creation
+    loop = asyncio.get_event_loop()
+
+    # Event handlers (called from SDK threads, need thread-safe queue operations)
     def recognizing_handler(evt: speechsdk.SpeechRecognitionEventArgs) -> None:
         """Handle interim results."""
         if evt.result.reason == speechsdk.ResultReason.RecognizingSpeech:
-            asyncio.create_task(results_queue.put((evt.result.text, False)))
+            # Thread-safe: schedule task in the event loop
+            asyncio.run_coroutine_threadsafe(
+                results_queue.put((evt.result.text, False)), loop
+            )
 
     def recognized_handler(evt: speechsdk.SpeechRecognitionEventArgs) -> None:
         """Handle final results."""
         if evt.result.reason == speechsdk.ResultReason.RecognizedSpeech:
-            asyncio.create_task(results_queue.put((evt.result.text, True)))
+            # Thread-safe: schedule task in the event loop
+            asyncio.run_coroutine_threadsafe(
+                results_queue.put((evt.result.text, True)), loop
+            )
+        elif evt.result.reason == speechsdk.ResultReason.NoMatch:
+            logger.warning(f"No speech recognized in session {session_id}")
 
     def session_stopped_handler(evt: speechsdk.SessionEventArgs) -> None:
         """Handle session end."""
-        asyncio.create_task(results_queue.put(None))
+        logger.info(f"Azure Speech session stopped for {session_id}")
+        asyncio.run_coroutine_threadsafe(results_queue.put(None), loop)
+
+    def canceled_handler(evt: speechsdk.SpeechRecognitionCanceledEventArgs) -> None:
+        """Handle recognition cancellation/errors."""
+        logger.error(f"Azure Speech recognition canceled for {session_id}: {evt.reason}")
+        if evt.reason == speechsdk.CancellationReason.Error:
+            logger.error(f"Error details: {evt.error_details}")
+        asyncio.run_coroutine_threadsafe(results_queue.put(None), loop)
 
     # Connect handlers
     recognizer.recognizing.connect(recognizing_handler)
     recognizer.recognized.connect(recognized_handler)
     recognizer.session_stopped.connect(session_stopped_handler)
+    recognizer.canceled.connect(canceled_handler)
 
     # Start continuous recognition
+    logger.info(f"Starting Azure Speech recognition for session {session_id}")
     recognizer.start_continuous_recognition()
 
     # Feed audio stream
     async def feed_audio() -> None:
         """Feed audio chunks to recognizer."""
         try:
+            chunk_count = 0
             async for chunk in audio_stream:
                 push_stream.write(chunk)
+                chunk_count += 1
+            logger.info(f"Finished feeding {chunk_count} audio chunks for session {session_id}")
             push_stream.close()
         except Exception as e:
-            print(f"Error feeding audio: {e}")
+            logger.error(f"Error feeding audio for session {session_id}: {e}")
             push_stream.close()
+            # Signal error by putting None in queue
+            asyncio.run_coroutine_threadsafe(results_queue.put(None), loop)
 
     # Start feeding audio in background
     feed_task = asyncio.create_task(feed_audio())
@@ -195,11 +161,23 @@ async def transcribe_audio_stream_azure(
         while True:
             result = await results_queue.get()
             if result is None:
+                logger.info(f"Recognition ended for session {session_id}")
                 break
             yield result
     finally:
-        recognizer.stop_continuous_recognition()
-        await feed_task
+        # Cleanup
+        logger.info(f"Cleaning up Azure Speech resources for session {session_id}")
+        try:
+            recognizer.stop_continuous_recognition()
+        except Exception as e:
+            logger.error(f"Error stopping recognizer: {e}")
+
+        # Wait for feed task to complete
+        try:
+            await asyncio.wait_for(feed_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            logger.warning(f"Feed task timeout for session {session_id}")
+            feed_task.cancel()
 
 
 async def get_azure_speech_token() -> dict[str, str | int]:

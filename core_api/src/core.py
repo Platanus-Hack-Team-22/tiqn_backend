@@ -12,108 +12,19 @@ from typing import TypedDict
 from .config import settings
 from .services.canonical import extract_with_claude
 from .services.session import session_manager
-from .services.transcription import transcribe_audio_chunk_whisper
 
 logger = logging.getLogger(__name__)
 
 
 class ProcessChunkResult(TypedDict, total=False):
-    """Result from processing an audio chunk."""
-    
+    """Result from processing a text chunk."""
+
     chunk_text: str
     full_transcript: str
     canonical: dict  # CanonicalV2 as dict
     timestamp: float
     session_info: dict
     convex_update: dict  # Optional: Result of real-time Convex update
-
-
-async def process_audio_chunk(
-    audio_chunk: bytes,
-    session_id: str,
-    dispatcher_id: str | None = None,
-    update_convex: bool = True,
-    audio_content_type: str = "audio/webm",
-    audio_filename: str = "audio.webm",
-) -> ProcessChunkResult:
-    """
-    Main function to process an audio chunk from an emergency call.
-    
-    This function should be called by your WebSocket API for each audio chunk received.
-    It handles the complete workflow:
-    1. Transcribe audio → text
-    2. Extract structured emergency data using Claude
-    3. Update session state
-    4. Update Convex database in real-time (if dispatcher_id provided)
-    5. Return updated data
-    
-    Args:
-        audio_chunk: Raw audio bytes (WebM format recommended)
-        session_id: Unique identifier for this call session
-        dispatcher_id: Convex ID of dispatcher (required for real-time Convex updates)
-        update_convex: Whether to update Convex database in real-time (default: True)
-    
-    Returns:
-        ProcessChunkResult with:
-        - chunk_text: Transcribed text from this chunk
-        - full_transcript: Complete transcript so far
-        - canonical: Structured emergency data (31 fields)
-        - timestamp: Unix timestamp
-        - session_info: Session metadata (duration, chunk count)
-        - convex_update: Result of Convex update (if enabled)
-    
-    Raises:
-        ValueError: If transcription or extraction fails
-        
-    Example:
-        ```python
-        # In your WebSocket endpoint:
-        from core_api.src.core import process_audio_chunk
-        
-        @websocket_route("/emergency/{call_id}")
-        async def handle_call(websocket, call_id: str, dispatcher_id: str):
-            while True:
-                audio_data = await websocket.receive_bytes()
-                
-                result = await process_audio_chunk(
-                    audio_chunk=audio_data,
-                    session_id=call_id,
-                    dispatcher_id=dispatcher_id,  # Real-time Convex updates!
-                    update_convex=True
-                )
-                
-                # Send structured data back to operator
-                await websocket.send_json(result)
-        ```
-    """
-
-    # Get or create session for this call
-    session = session_manager.get_or_create_session(session_id)
-    # Step 1: Transcribe audio chunk to text
-    chunk_text = await transcribe_audio_chunk_whisper(
-        audio_chunk, content_type=audio_content_type, filename=audio_filename
-    )
-
-    if not chunk_text:
-        # Return current state if transcription produced no text
-        return {
-            "chunk_text": "",
-            "full_transcript": session.full_transcript,
-            "canonical": session.canonical_data.model_dump(),
-            "timestamp": time.time(),
-            "session_info": {
-                "session_id": session_id,
-                "duration_seconds": session.get_duration(),
-                "chunk_count": session.chunk_count,
-            },
-        }
-
-    return await process_text_chunk(
-        chunk_text=chunk_text,
-        session_id=session_id,
-        dispatcher_id=dispatcher_id,
-        update_convex=update_convex,
-    )
 
 
 async def process_text_chunk(
