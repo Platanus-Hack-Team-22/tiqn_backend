@@ -62,6 +62,7 @@ async def process_text_chunk(
         # Extract canonical data using Claude
         updated_canonical = await extract_with_claude(
             transcript_chunk=chunk_text,
+            full_transcript=session.full_transcript,
             existing_canonical=session.canonical_data,
         )
 

@@ -1,8 +1,9 @@
 """Canonical data extraction using Claude."""
 
 import json
+import logging
 import re
-from typing import Any
+from typing import Any, Tuple
 
 from anthropic import AsyncAnthropic
 
@@ -11,6 +12,11 @@ from ..schemas import CanonicalV2
 
 # Global async client for connection reuse
 _anthropic_client: AsyncAnthropic | None = None
+
+# Prompt safety limits
+FULL_TRANSCRIPT_MAX_CHARS = 4000
+
+logger = logging.getLogger(__name__)
 
 
 def get_anthropic_client() -> AsyncAnthropic:
@@ -53,6 +59,15 @@ CONTEXTO:
 - Ignora especulaciones, suposiciones o inferencias
 - Los campos no relevantes deben quedar como cadena vacía ""
 
+SECCIONES PRIORITARIAS QUE DEBES RELLENAR (usa el nombre exacto del campo en el JSON final):
+- Identidad: nombre, apellido, sexo, edad
+- Estado del paciente: respira, estado_respiratorio, consciente, avdi
+- Información clínica: motivo, inicio_sintomas, historia_clinica, medicamentos, alergias, signos_vitales
+- Ubicación: direccion, numero, comuna, depto, ubicacion_referencia
+- Otros relevantes: seguro_salud, aviso_conserjeria
+
+Si llegan datos nuevos que corrigen lo anterior, SOBRESCRÍBELOS. Siempre conserva la versión más reciente confiable.
+
 REGLAS DE TIPO Y FORMATO:
 - nombre/apellido: string, solo letras y espacios
 - sexo: "M" o "F" (si no se menciona: "")
@@ -81,14 +96,33 @@ REGLAS ESTRICTAS:
 3. NUNCA extraigas datos de fragmentos anteriores - solo del fragmento ACTUAL
 4. Si el fragmento no contiene información nueva, devuelve JSON con todos los campos vacíos
 5. Mantén coherencia con los datos ya extraídos (mostrados en contexto)
+6. Si aparece información más precisa o se corrige un dato ya registrado, ACTUALIZA el campo correspondiente con el valor nuevo y descarta el anterior.
 
 Devuelve SOLO JSON válido, sin markdown, sin explicaciones, sin campos duplicados."""
 
 
+def _clip_full_transcript(text: str, max_chars: int = FULL_TRANSCRIPT_MAX_CHARS) -> Tuple[str, bool]:
+    """Return the last max_chars of the text and flag if truncation happened."""
+    if not text:
+        return "", False
+    if len(text) <= max_chars:
+        return text, False
+    return text[-max_chars:], True
+
+
 def build_user_prompt(
-    transcript_chunk: str, existing_data: CanonicalV2 | None = None
+    transcript_chunk: str,
+    full_transcript: str,
+    existing_data: CanonicalV2 | None = None,
 ) -> str:
     """Build the user prompt for Claude."""
+
+    clipped_history, truncated = _clip_full_transcript(full_transcript)
+
+    history_header = ""
+    if clipped_history:
+        suffix = f" (últimos {FULL_TRANSCRIPT_MAX_CHARS} caracteres)" if truncated else ""
+        history_header = f"\nHistorial completo de la llamada{suffix}:\n{clipped_history}\n"
 
     context = ""
     if existing_data:
@@ -98,12 +132,12 @@ def build_user_prompt(
         if filled_fields:
             context = f"\n\nDatos ya extraídos en fragmentos anteriores:\n{json.dumps(filled_fields, ensure_ascii=False, indent=2)}\n"
 
-    return f"""Fragmento de transcripción (es-CL):{context}
+    return f"""Fragmento de transcripción (es-CL):{context}{history_header}
 
-Transcripción actual:
+Transcripción actual (nuevo fragmento):
 {transcript_chunk}
 
-Extrae SOLO la información nueva de este fragmento y devuelve JSON con este esquema exacto:
+Extrae SOLO la información nueva considerando todo el historial disponible y devuelve JSON con este esquema exacto:
 {{
   "nombre": "",
   "apellido": "",
@@ -142,13 +176,25 @@ Recuerda: si no hay información nueva en este fragmento, devuelve todas las cad
 
 async def extract_with_claude(
     transcript_chunk: str,
+    full_transcript: str,
     existing_canonical: CanonicalV2 | None = None,
 ) -> CanonicalV2:
     """Extract canonical data from transcript chunk using Claude."""
 
     client = get_anthropic_client()
 
-    user_prompt = build_user_prompt(transcript_chunk, existing_canonical)
+    user_prompt = build_user_prompt(
+        transcript_chunk=transcript_chunk,
+        full_transcript=full_transcript,
+        existing_data=existing_canonical,
+    )
+
+    logger.debug(
+        "Sending transcript to Claude (chunk_len=%d, full_len=%d, truncated=%s)",
+        len(transcript_chunk or ""),
+        len(full_transcript or ""),
+        len(full_transcript or "") > FULL_TRANSCRIPT_MAX_CHARS,
+    )
 
     try:
         message = await client.messages.create(
