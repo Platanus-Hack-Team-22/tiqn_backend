@@ -299,7 +299,14 @@ class ConvexService:
             logger.info(f"Calling incidents:createOrUpdate with data: {update_data}")
             incident_id = self.client.mutation("incidents:createOrUpdate", update_data)
             logger.info(f"Successfully updated incident {incident_id}")
-            
+
+            # Update app_state to track this as the active incident
+            try:
+                self.client.mutation("app_state:setActiveIncident", {"incidentId": incident_id})
+                logger.info(f"Set active incident to {incident_id}")
+            except Exception as e:
+                logger.warning(f"Failed to set active incident in app_state: {e}")
+
             return {
                 "success": True,
                 "incident_id": incident_id,

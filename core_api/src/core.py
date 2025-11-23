@@ -286,10 +286,17 @@ def end_session(
                 )
                 logger.info(f"Convex save result: {save_result}")
                 final_data["convex_save"] = save_result
+
+                # Clear the active incident from app_state
+                try:
+                    convex.client.mutation("app_state:setActiveIncident", {"incidentId": None})
+                    logger.info("Cleared active incident from app_state")
+                except Exception as e:
+                    logger.warning(f"Failed to clear active incident: {e}")
             except Exception as e:
                 logger.error(f"Warning: Could not save to Convex: {e}")
                 final_data["convex_save"] = {"success": False, "error": str(e)}
-    
+
     return final_data
 
 
