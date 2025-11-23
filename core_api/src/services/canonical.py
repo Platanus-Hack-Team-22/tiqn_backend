@@ -1,8 +1,6 @@
 """Canonical data extraction using Claude."""
 
-import json
 import re
-from typing import Any
 
 from anthropic import AsyncAnthropic
 
@@ -144,32 +142,26 @@ async def extract_with_claude(
     transcript_chunk: str,
     existing_canonical: CanonicalV2 | None = None,
 ) -> CanonicalV2:
-    """Extract canonical data from transcript chunk using Claude."""
+    """Extract canonical data from transcript chunk using Claude with structured outputs."""
 
     client = get_anthropic_client()
 
     user_prompt = build_user_prompt(transcript_chunk, existing_canonical)
 
     try:
-        message = await client.messages.create(
+        # Use structured outputs with beta feature for guaranteed JSON schema compliance
+        message = await client.beta.messages.parse(
             model=settings.ANTHROPIC_MODEL,
             max_tokens=2048,
             temperature=0,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
+            response_type=CanonicalV2,
+            betas=["structured-outputs-2025-11-13"],
         )
 
-        # Extract JSON from response
-        content = message.content[0].text if message.content else ""
-
-        # Parse JSON
-        canonical_dict = parse_json_response(content)
-        if not canonical_dict:
-            # If parsing failed, return existing or default
-            return existing_canonical or CanonicalV2()
-
-        # Create new canonical object
-        new_canonical = CanonicalV2(**canonical_dict)
+        # Extract parsed canonical data directly
+        new_canonical = message.content
 
         # Merge with existing data
         if existing_canonical:
@@ -185,27 +177,6 @@ async def extract_with_claude(
     except Exception as e:
         print(f"Error extracting with Claude: {e}")
         return existing_canonical or CanonicalV2()
-
-
-def parse_json_response(text: str) -> dict[str, Any] | None:
-    """Parse JSON from Claude's response, handling markdown code blocks."""
-    # Remove markdown code blocks
-    text = re.sub(r"```(?:json)?\s*", "", text)
-    text = text.strip()
-
-    # Find JSON object
-    first_brace = text.find("{")
-    last_brace = text.rfind("}")
-
-    if first_brace == -1 or last_brace == -1:
-        return None
-
-    json_text = text[first_brace : last_brace + 1]
-
-    try:
-        return json.loads(json_text)
-    except json.JSONDecodeError:
-        return None
 
 
 def merge_canonical_data(existing: CanonicalV2, new_data: CanonicalV2) -> CanonicalV2:
