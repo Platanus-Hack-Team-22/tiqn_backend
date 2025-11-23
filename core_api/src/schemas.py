@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class CanonicalV2(BaseModel):
-    """Structured emergency data format for Hatzalah Chile."""
+    """Structured emergency data format for tiqn."""
 
     # Personal Information
     nombre: str = Field(default="", description="First name")
@@ -22,8 +22,12 @@ class CanonicalV2(BaseModel):
     google_maps_url: str = Field(default="", description="Generated Google Maps URL")
 
     # Medical Assessment
-    codigo: str = Field(default="Verde", description="Triage code: Verde, Amarillo, Rojo")
-    avdi: str = Field(default="", description="AVPU scale: alerta, verbal, dolor, inconsciente")
+    codigo: str = Field(
+        default="Verde", description="Triage code: Verde, Amarillo, Rojo"
+    )
+    avdi: str = Field(
+        default="", description="AVPU scale: alerta, verbal, dolor, inconsciente"
+    )
     estado_respiratorio: str = Field(default="", description="respira or no respira")
     consciente: str = Field(default="", description="si or no")
     respira: str = Field(default="", description="si or no")
@@ -31,7 +35,9 @@ class CanonicalV2(BaseModel):
     inicio_sintomas: str = Field(default="", description="Symptom onset time")
 
     # Resources
-    cantidad_rescatistas: str = Field(default="", description="Number of responders needed")
+    cantidad_rescatistas: str = Field(
+        default="", description="Number of responders needed"
+    )
     recursos_requeridos: str = Field(default="", description="Required resources")
 
     # Medical History
@@ -43,7 +49,9 @@ class CanonicalV2(BaseModel):
 
     # Administrative
     seguro_salud: str = Field(default="", description="Health insurance")
-    aviso_conserjeria: str = Field(default="", description="Building concierge notification")
+    aviso_conserjeria: str = Field(
+        default="", description="Building concierge notification"
+    )
     signos_vitales: str = Field(default="", description="Vital signs")
     checklist_url: str = Field(default="", description="Checklist URL")
     medico_turno: str = Field(default="", description="On-duty physician")
@@ -82,4 +90,3 @@ class TranscriptionResponse(BaseModel):
     text: str
     canonical_data: CanonicalV2
     duration_seconds: int
-
